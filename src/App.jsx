@@ -50,11 +50,11 @@ export default function App() {
                 </div>
               </Link>
 
-              <div className="flex-1 max-w-lg mx-4">
+              <div className="flex-1 max-w-xs mx-200">
                 <input
                   type="text"
-                  placeholder="Haberlerde ara..."
-                  className="w-full px-4 py-2 rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="🔍︎"
+                  className="w-full px-5 py-2 rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -102,10 +102,15 @@ export default function App() {
                       Bir Haberim Var!
                     </button>
                     <p className="mt-4 text-gray-600">
-                      Geleneksel haberciliği bir topluluk platformuna dönüştürerek, herkesin kendi gözünden şehri anlatmasına imkân veren platform.
+                     
                     </p>
                   </div>
                 )}
+
+
+
+
+
                 <h2 className="text-2xl font-bold text-center mb-8">Gündem</h2>
                 <BlogList searchQuery={searchQuery} />
               </>

@@ -15,6 +15,7 @@ export default function CreateBlog({ onClose }) {
   const [error, setError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
+  const [isAnonymous, setIsAnonymous] = useState(false); // Anonim paylaşım kontrolü
 
   const categories = [
     'Sosyal', 'Siyasal', 'Ekonomi', 'Finans', 'İş', 'İşçi', 'Magazin',
@@ -157,8 +158,10 @@ export default function CreateBlog({ onClose }) {
         additionalImages: imageUrls.slice(1), // Diğer görseller
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        userId: auth.currentUser.uid,
-        authorName: auth.currentUser.displayName || 'İsimsiz Yazar',
+        userId: isAnonymous ? null : auth.currentUser.uid, // Anonim kontrolü
+        authorName: isAnonymous
+          ? 'Anonim'
+          : auth.currentUser.displayName || 'İsimsiz Yazar',
         likes: 0,
         views: 0,
         dislikes: 0,
@@ -257,22 +260,6 @@ export default function CreateBlog({ onClose }) {
                     Ana Görsel
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newImages = [...images];
-                    const newPreviews = [...imagePreviews];
-                    newImages.splice(index, 1);
-                    newPreviews.splice(index, 1);
-                    setImages(newImages);
-                    setImagePreviews(newPreviews);
-                  }}
-                  className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </button>
               </div>
             ))}
           </div>
@@ -283,37 +270,54 @@ export default function CreateBlog({ onClose }) {
         <label className="block text-sm font-medium text-gray-700">İçerik</label>
         <textarea
           required
+          rows="6"
           className="mt-1 block w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500"
-          rows="10"
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
       </div>
 
-      <div className="flex items-start space-x-2">
+      <div className="flex items-center">
         <input
           type="checkbox"
-          id="consent"
-          checked={consentChecked}
-          onChange={(e) => setConsentChecked(e.target.checked)}
-          className="mt-1"
+          id="anonymous"
+          checked={isAnonymous}
+          onChange={(e) => setIsAnonymous(e.target.checked)}
         />
-        <label htmlFor="consent" className="text-sm text-gray-600">
-          Paylaşılan haberlerin Sinop Belediyesi ve Sinop Emniyet Genel Müdürlüğü tarafından takip edildiğini okudum, onaylıyorum.
+        <label htmlFor="anonymous" className="ml-2 text-sm text-gray-600">
+          Anonim olarak paylaş (Moderatör Harici Silemez ve Düzenleyemezsiniz!) 
         </label>
       </div>
 
-      <button
-        type="submit"
-        disabled={loading || analyzing || !consentChecked}
-        className={`w-full py-2 px-4 rounded-md ${
-          loading || analyzing || !consentChecked
-            ? 'bg-gray-400 cursor-not-allowed'
-            : 'bg-blue-600 hover:bg-blue-700 text-white'
-        } transition-colors duration-200`}
-      >
-        {loading ? 'Paylaşılıyor...' : analyzing ? 'Görseller Analiz Ediliyor...' : 'Haberi Paylaş'}
-      </button>
+      <div className="flex items-center">
+        <input
+          type="checkbox"
+          id="consent"
+          required
+          checked={consentChecked}
+          onChange={(e) => setConsentChecked(e.target.checked)}
+        />
+        <label htmlFor="consent" className="ml-2 text-sm text-gray-600">
+          Haberimin kurallara uyduğunu, Sinop Belediyesi ve Sinop Emniyet Genel Müdürlüğü tarafından takip edildiğini okudum, onaylıyorum.
+        </label>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 focus:ring-2 focus:ring-blue-300"
+        >
+          {loading ? 'Paylaşılıyor...' : 'Paylaş'}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-2 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+        >
+          İptal
+        </button>
+      </div>
     </form>
   );
 }

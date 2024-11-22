@@ -199,7 +199,7 @@ export default function BlogList({ searchQuery }) {
                     </Link>
                   </span>
                   <span className="text-sm text-gray-500">
-                    {blog.views || 0} görüntülenme
+                    
                   </span>
                 </div>
                 <div className="flex items-center space-x-4">

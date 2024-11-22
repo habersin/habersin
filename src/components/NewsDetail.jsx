@@ -1,63 +1,120 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { db, auth } from '../firebase';
-import { doc, getDoc, updateDoc, collection, addDoc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import { 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot,
+  deleteDoc,
+  setDoc,
+  arrayUnion,
+  arrayRemove 
+} from 'firebase/firestore';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { FiThumbsUp, FiThumbsDown } from 'react-icons/fi';
+import ReportButton from './ReportButton';
 
-export default function NewsDetail() {
+// Tarayıcı parmak izi oluştur
+const generateVisitorId = () => {
+  const browserInfo = [
+    navigator.userAgent,
+    navigator.language,
+    screen.width,
+    screen.height,
+    new Date().getTimezoneOffset()
+  ].join('|');
+  
+  // Basit bir hash fonksiyonu
+  let hash = 0;
+  for (let i = 0; i < browserInfo.length; i++) {
+    const char = browserInfo.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+};
+
+export default function BlogDetail({ setShowAuth }) {
   const { id } = useParams();
-  const [news, setNews] = useState(null);
+  const [blog, setBlog] = useState(null);
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [likes, setLikes] = useState(0);
-  const [dislikes, setDislikes] = useState(0);
   const [userReaction, setUserReaction] = useState(null);
+  const [visitorId, setVisitorId] = useState(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
-    const fetchNews = async () => {
+    setVisitorId(generateVisitorId());
+  }, []);
+
+  useEffect(() => {
+    const fetchBlog = async () => {
+      if (!visitorId) return;
+
       try {
-        const newsRef = doc(db, 'news', id);
-        const newsDoc = await getDoc(newsRef);
+        const blogRef = doc(db, 'blogs', id);
+        const blogDoc = await getDoc(blogRef);
         
-        if (newsDoc.exists()) {
-          const newsData = newsDoc.data();
-          setNews({
-            id: newsDoc.id,
-            ...newsData,
-            createdAt: newsData.createdAt?.toDate()
+        if (blogDoc.exists()) {
+          const blogData = blogDoc.data();
+          setBlog({
+            id: blogDoc.id,
+            ...blogData,
+            createdAt: blogData.createdAt?.toDate(),
+            images: [blogData.imageUrl, ...(blogData.additionalImages || [])]
           });
 
-          // IP bazlı görüntülenme sayısı
-          const viewsRef = doc(collection(newsRef, 'stats'), 'views');
+          const viewsRef = doc(db, 'blogs', id, 'stats', 'views');
           const viewsDoc = await getDoc(viewsRef);
-          
+
           if (!viewsDoc.exists()) {
-            await updateDoc(viewsRef, { count: 1, ips: [window.clientIP] });
-          } else if (!viewsDoc.data().ips.includes(window.clientIP)) {
+            await setDoc(viewsRef, {
+              count: 1,
+              visitors: [visitorId]
+            });
+          } else if (!viewsDoc.data().visitors.includes(visitorId)) {
             await updateDoc(viewsRef, {
               count: viewsDoc.data().count + 1,
-              ips: [...viewsDoc.data().ips, window.clientIP]
+              visitors: arrayUnion(visitorId)
             });
           }
+
+          if (auth.currentUser) {
+            const reactionRef = doc(db, 'blogs', id, 'reactions', auth.currentUser.uid);
+            const reactionDoc = await getDoc(reactionRef);
+            if (reactionDoc.exists()) {
+              setUserReaction(reactionDoc.data().type);
+            }
+          }
+        } else {
+          setError('Blog yazısı bulunamadı.');
         }
       } catch (error) {
-        console.error('Haber detayı yüklenirken hata:', error);
-        setError('Haber detayı yüklenirken bir hata oluştu.');
+        console.error('Blog detayı yüklenirken hata:', error);
+        setError('Blog detayı yüklenirken bir hata oluştu.');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchNews();
-  }, [id]);
+    if (id && visitorId) {
+      fetchBlog();
+    }
+  }, [id, visitorId]);
 
   useEffect(() => {
     if (!id) return;
 
-    const commentsRef = collection(db, 'news', id, 'comments');
+    const commentsRef = collection(db, 'blogs', id, 'comments');
     const q = query(commentsRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -74,14 +131,19 @@ export default function NewsDetail() {
 
   const handleComment = async (e) => {
     e.preventDefault();
-    if (!auth.currentUser || !newComment.trim()) return;
+    if (!auth.currentUser) {
+      setShowAuth(true);
+      return;
+    }
+    
+    if (!newComment.trim()) return;
 
     try {
-      const commentsRef = collection(db, 'news', id, 'comments');
+      const commentsRef = collection(db, 'blogs', id, 'comments');
       await addDoc(commentsRef, {
         content: newComment,
         userId: auth.currentUser.uid,
-        userName: auth.currentUser.displayName,
+        userName: auth.currentUser.displayName || 'İsimsiz Kullanıcı',
         createdAt: new Date()
       });
       setNewComment('');
@@ -92,27 +154,51 @@ export default function NewsDetail() {
   };
 
   const handleReaction = async (type) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      setShowAuth(true);
+      return;
+    }
 
     try {
-      const reactionRef = doc(db, 'news', id, 'reactions', auth.currentUser.uid);
+      const blogRef = doc(db, 'blogs', id);
+      const reactionRef = doc(db, 'blogs', id, 'reactions', auth.currentUser.uid);
       const reactionDoc = await getDoc(reactionRef);
 
       if (reactionDoc.exists()) {
         const currentReaction = reactionDoc.data().type;
         if (currentReaction === type) {
-          // Reaksiyonu kaldır
-          await updateDoc(reactionRef, { type: null });
+          await deleteDoc(reactionRef);
+          await updateDoc(blogRef, {
+            [currentReaction + 's']: (blog[currentReaction + 's'] || 0) - 1
+          });
           setUserReaction(null);
+          setBlog(prev => ({
+            ...prev,
+            [currentReaction + 's']: (prev[currentReaction + 's'] || 0) - 1
+          }));
         } else {
-          // Reaksiyonu değiştir
-          await updateDoc(reactionRef, { type });
+          await setDoc(reactionRef, { type });
+          await updateDoc(blogRef, {
+            [currentReaction + 's']: (blog[currentReaction + 's'] || 0) - 1,
+            [type + 's']: (blog[type + 's'] || 0) + 1
+          });
           setUserReaction(type);
+          setBlog(prev => ({
+            ...prev,
+            [currentReaction + 's']: (prev[currentReaction + 's'] || 0) - 1,
+            [type + 's']: (prev[type + 's'] || 0) + 1
+          }));
         }
       } else {
-        // Yeni reaksiyon ekle
-        await setDoc(reactionRef, { type, userId: auth.currentUser.uid });
+        await setDoc(reactionRef, { type });
+        await updateDoc(blogRef, {
+          [type + 's']: (blog[type + 's'] || 0) + 1
+        });
         setUserReaction(type);
+        setBlog(prev => ({
+          ...prev,
+          [type + 's']: (prev[type + 's'] || 0) + 1
+        }));
       }
     } catch (error) {
       console.error('Reaksiyon eklenirken hata:', error);
@@ -127,11 +213,11 @@ export default function NewsDetail() {
     );
   }
 
-  if (error || !news) {
+  if (error || !blog) {
     return (
       <div className="max-w-4xl mx-auto p-6">
         <div className="bg-red-50 text-red-600 p-4 rounded-lg">
-          {error || 'Haber bulunamadı.'}
+          {error || 'Blog yazısı bulunamadı.'}
         </div>
       </div>
     );
@@ -141,60 +227,79 @@ export default function NewsDetail() {
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
-          <h1 className="text-3xl font-bold mb-4">{news.title}</h1>
+          <h1 className="text-3xl font-bold mb-4">{blog.title}</h1>
           
           <div className="flex items-center justify-between mb-6">
-            <Link 
-              to={`/profile/${news.userId}`}
-              className="flex items-center space-x-2 text-gray-600 hover:text-blue-600"
-            >
-              <span className="font-medium">{news.userName}</span>
-            </Link>
-            <span className="text-gray-500">
-              {format(news.createdAt, 'dd MMMM yyyy HH:mm', { locale: tr })}
-            </span>
+            <div className="flex items-center space-x-2">
+              <Link to={/user/${blog.userId}} className="text-gray-600 hover:text-blue-600">
+                {blog.authorName}
+              </Link>
+              <span className="text-gray-400">•</span>
+              <span className="text-gray-600">{blog.category}</span>
+            </div>
+            <div className="flex items-center space-x-4">
+              <time className="text-gray-500">
+                {format(blog.createdAt, 'dd MMMM yyyy', { locale: tr })}
+              </time>
+              <ReportButton blogId={blog.id} blogTitle={blog.title} />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 mb-6">
-            {news.imageUrls.map((url, index) => (
+          {blog.images && blog.images.length > 0 && (
+            <div className="relative mb-6">
               <img
-                key={index}
-                src={url}
-                alt={`Haber görseli ${index + 1}`}
-                className="w-full rounded-lg"
+                src={blog.images[currentImageIndex]}
+                alt={blog.title}
+                className="w-full rounded-lg object-cover max-h-96"
               />
-            ))}
-          </div>
+              {blog.images.length > 1 && (
+                <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-2">
+                  {blog.images.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentImageIndex(index)}
+                      className={w-3 h-3 rounded-full ${
+                        currentImageIndex === index ? 'bg-blue-500' : 'bg-gray-300'
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-          <p className="text-gray-700 mb-6 whitespace-pre-wrap">{news.description}</p>
+          <p className="text-gray-700 mb-6 whitespace-pre-wrap">{blog.content}</p>
 
           <div className="flex items-center justify-between border-t pt-4">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => handleReaction('like')}
-                className={`flex items-center space-x-1 ${
-                  userReaction === 'like' ? 'text-blue-600' : 'text-gray-500'
-                }`}
-                disabled={!auth.currentUser}
+                className={flex items-center space-x-2 px-3 py-1 rounded-md transition-colors ${
+                  userReaction === 'like'
+                    ? 'bg-blue-100 text-blue-600'
+                    : 'text-gray-500 hover:bg-gray-100'
+                }}
+                title={auth.currentUser ? 'Beğen' : 'Beğenmek için giriş yapın'}
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                </svg>
-                <span>{likes}</span>
+                <FiThumbsUp className="w-5 h-5" />
+                <span>{blog.likes || 0}</span>
               </button>
               
               <button
                 onClick={() => handleReaction('dislike')}
-                className={`flex items-center space-x-1 ${
-                  userReaction === 'dislike' ? 'text-red-600' : 'text-gray-500'
-                }`}
-                disabled={!auth.currentUser}
+                className={flex items-center space-x-2 px-3 py-1 rounded-md transition-colors ${
+                  userReaction === 'dislike'
+                    ? 'bg-red-100 text-red-600'
+                    : 'text-gray-500 hover:bg-gray-100'
+                }}
+                title={auth.currentUser ? 'Beğenme' : 'Beğenmemek için giriş yapın'}
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018c.163 0 .326.02.485.06L17 4m-7 10v2a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2m5 6h2a2 2 0 002-2v-6a2 2 0 00-2-2h-2.5" />
-                </svg>
-                <span>{dislikes}</span>
+                <FiThumbsDown className="w-5 h-5" />
+                <span>{blog.dislikes || 0}</span>
               </button>
+            </div>
+            <div className="text-gray-500">
+              
             </div>
           </div>
         </div>
@@ -207,25 +312,30 @@ export default function NewsDetail() {
               <textarea
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
-                className="w-full p-2 border rounded-md"
+                className="w-full p-3 border rounded-md focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Yorumunuzu yazın..."
                 rows="3"
                 required
               />
               <button
                 type="submit"
-                className="mt-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
               >
                 Yorum Yap
               </button>
             </form>
           ) : (
-            <p className="text-gray-500 mb-6">
-              Yorum yapmak için lütfen{' '}
-              <Link to="/login" className="text-blue-500 hover:text-blue-600">
-                giriş yapın
-              </Link>
-            </p>
+            <div className="bg-gray-50 p-4 rounded-md mb-6">
+              <p className="text-gray-600">
+                Yorum yapmak için lütfen{' '}
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  giriş yapın
+                </button>
+              </p>
+            </div>
           )}
 
           <div className="space-y-4">
@@ -233,18 +343,24 @@ export default function NewsDetail() {
               <div key={comment.id} className="border-b pb-4">
                 <div className="flex justify-between items-start mb-2">
                   <Link
-                    to={`/profile/${comment.userId}`}
+                    to={/user/${comment.userId}}
                     className="font-medium text-gray-700 hover:text-blue-600"
                   >
                     {comment.userName}
                   </Link>
-                  <span className="text-sm text-gray-500">
+                  <time className="text-sm text-gray-500">
                     {format(comment.createdAt, 'dd MMM yyyy HH:mm', { locale: tr })}
-                  </span>
+                  </time>
                 </div>
                 <p className="text-gray-600">{comment.content}</p>
               </div>
             ))}
+
+            {comments.length === 0 && (
+              <p className="text-center text-gray-500 py-4">
+                Henüz yorum yapılmamış. İlk yorumu siz yapın!
+              </p>
+            )}
           </div>
         </div>
       </div>
